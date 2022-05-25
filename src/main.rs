@@ -1,18 +1,26 @@
-use actix_web::{get, web, App, HttpServer, Responder};
+mod es;
+mod interceptor;
+mod service;
+mod utils;
 
-#[get("/hello/{name}")]
-async fn greet(name: web::Path<String>) -> impl Responder {
-    format!("Hello {name}!")
-}
+use dotenv::dotenv;
+use es::init;
+use kafka::kafka::consume_messages;
+use service::products::product_server::ProductServer;
+use service::ProductService;
+use tonic::transport::Server;
 
-#[actix_web::main] // or #[tokio::main]
-async fn main() -> std::io::Result<()> {
-    HttpServer::new(move || {
-        App::new()
-            .route("/hello", web::get().to(|| async { "Hello World!" }))
-            .service(greet)
-    })
-        .bind(("127.0.0.1", 8080))?
-        .run()
-        .await
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init().await;
+    consume_messages("USER_CREATED", "localhost:29092").await;
+    dotenv().ok();
+    let addr = "127.0.0.1:5003".parse()?;
+    let product_service = ProductService::default();
+
+    let svc = ProductServer::with_interceptor(product_service, interceptor::check_auth);
+
+    Server::builder().add_service(svc).serve(addr).await?;
+
+    Ok(())
 }
